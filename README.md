@@ -1,105 +1,53 @@
-# Python-code
-
 pipeline {
     agent any
 
     environment {
-        JENKINS_USER = 'your-username'
-        JENKINS_PASS = 'your-password'
-        JOB_URL = 'http://jenkins.local/job/your-job-name/lastBuild/api/json'
+        JIRA_BASE_URL = 'https://your-domain.atlassian.net'
+        JIRA_PROJECT_KEY = 'PROJ'
+        JIRA_ISSUE_TYPE = 'Bug'
+        JIRA_CREDS_ID = 'jira-api-creds'
     }
 
     stages {
-        stage('Generate Job Details Report') {
+        stage('Build') {
             steps {
-                script {
-                    def authString = "${env.JENKINS_USER}:${env.JENKINS_PASS}".bytes.encodeBase64().toString()
-                    def url = new URL(env.JOB_URL)
-                    def connection = url.openConnection()
-                    connection.setRequestProperty("Authorization", "Basic ${authString}")
-                    def response = connection.inputStream.text
+                echo 'Running Build...'
+                // Simulate failure
+                error("Build failed for testing Jira integration")
+            }
+        }
+    }
 
-                    def json = new groovy.json.JsonSlurper().parseText(response)
+    post {
+        failure {
+            script {
+                def jobName = env.JOB_NAME
+                def buildNumber = env.BUILD_NUMBER
+                def buildUrl = env.BUILD_URL
+                def errorMsg = "Job '${jobName}' failed at build #${buildNumber}. Check details: ${buildUrl}"
 
-                    def buildNumber = json.number
-                    def buildStatus = json.result
-                    def buildTime = new Date(json.timestamp).toString()
-                    def paramList = []
-
-                    json.actions.each { action ->
-                        if (action?.parameters) {
-                            action.parameters.each { param ->
-                                def value = param.value
-                                paramList << [
-                                    name: param.name,
-                                    value: value,
-                                    type: value?.getClass()?.simpleName ?: 'null',
-                                    length: value?.toString()?.length() ?: 0,
-                                    isEmpty: (value == null || value.toString().trim().isEmpty()),
-                                    display: value?.toString() ?: ''
-                                ]
+                withCredentials([usernamePassword(credentialsId: env.JIRA_CREDS_ID,
+                                                  usernameVariable: 'JIRA_USER',
+                                                  passwordVariable: 'JIRA_TOKEN')]) {
+                    def payload = """{
+                        "fields": {
+                            "project": {
+                                "key": "${env.JIRA_PROJECT_KEY}"
+                            },
+                            "summary": "Jenkins Job Failed: ${jobName} #${buildNumber}",
+                            "description": "${errorMsg}",
+                            "issuetype": {
+                                "name": "${env.JIRA_ISSUE_TYPE}"
                             }
                         }
-                    }
+                    }"""
 
-                    def paramTableRows = paramList.collect {
-                        """
-                        <tr>
-                            <td>${it.name}</td>
-                            <td>${it.value}</td>
-                            <td>${it.type}</td>
-                            <td>${it.length}</td>
-                            <td>${it.isEmpty}</td>
-                            <td>${it.display}</td>
-                        </tr>
-                        """
-                    }.join("\n")
-
-                    def reportHtml = """
-                        <html>
-                        <head>
-                            <title>Jenkins Job Report</title>
-                            <style>
-                                table { border-collapse: collapse; width: 100%; }
-                                th, td { border: 1px solid #ddd; padding: 8px; }
-                                th { background-color: #f2f2f2; text-align: left; }
-                            </style>
-                        </head>
-                        <body>
-                            <h2>Job: ${json.fullDisplayName}</h2>
-                            <p><strong>Build Number:</strong> ${buildNumber}</p>
-                            <p><strong>Status:</strong> ${buildStatus}</p>
-                            <p><strong>Timestamp:</strong> ${buildTime}</p>
-
-                            <h3>Parameter Details</h3>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Value</th>
-                                        <th>Type</th>
-                                        <th>Length</th>
-                                        <th>Is Empty</th>
-                                        <th>ToString()</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${paramTableRows}
-                                </tbody>
-                            </table>
-                        </body>
-                        </html>
+                    sh """
+                        curl -X POST -H "Content-Type: application/json" \
+                             -u "${JIRA_USER}:${JIRA_TOKEN}" \
+                             --data '${payload}' \
+                             ${env.JIRA_BASE_URL}/rest/api/3/issue
                     """
-
-                    writeFile file: 'job-report.html', text: reportHtml
-                    archiveArtifacts artifacts: 'job-report.html', onlyIfSuccessful: true
-
-                    emailext(
-                        subject: "Jenkins Job Report - ${json.fullDisplayName}",
-                        to: 'you@example.com',
-                        mimeType: 'text/html',
-                        body: reportHtml
-                    )
                 }
             }
         }
