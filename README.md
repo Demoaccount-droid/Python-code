@@ -1,55 +1,40 @@
-pipeline {
-    agent any
+#!/bin/bash
 
-    environment {
-        JIRA_BASE_URL = 'https://your-domain.atlassian.net'
-        JIRA_PROJECT_KEY = 'PROJ'
-        JIRA_ISSUE_TYPE = 'Bug'
-        JIRA_CREDS_ID = 'jira-api-creds'
-    }
+# -------- Configuration --------
+JENKINS_URL="http://your-jenkins-host"
+USERNAME="your-username"
+API_TOKEN="your-api-token"
 
-    stages {
-        stage('Build') {
-            steps {
-                echo 'Running Build...'
-                // Simulate failure
-                error("Build failed for testing Jira integration")
-            }
-        }
-    }
+# List of resources to create
+# Format: name|labels|description
+RESOURCES=(
+  "device-01|android,pixel|Pixel 6 - Automation Device"
+  "device-02|android,samsung|Samsung Galaxy S22"
+  "device-03|ios,ipad|iPad 10th Gen"
+)
 
-    post {
-        failure {
-            script {
-                def jobName = env.JOB_NAME
-                def buildNumber = env.BUILD_NUMBER
-                def buildUrl = env.BUILD_URL
-                def errorMsg = "Job '${jobName}' failed at build #${buildNumber}. Check details: ${buildUrl}"
+# --------------------------------
 
-                withCredentials([usernamePassword(credentialsId: env.JIRA_CREDS_ID,
-                                                  usernameVariable: 'JIRA_USER',
-                                                  passwordVariable: 'JIRA_TOKEN')]) {
-                    def payload = """{
-                        "fields": {
-                            "project": {
-                                "key": "${env.JIRA_PROJECT_KEY}"
-                            },
-                            "summary": "Jenkins Job Failed: ${jobName} #${buildNumber}",
-                            "description": "${errorMsg}",
-                            "issuetype": {
-                                "name": "${env.JIRA_ISSUE_TYPE}"
-                            }
-                        }
-                    }"""
+# Get CSRF crumb
+CRUMB=$(curl -s -u "${USERNAME}:${API_TOKEN}" \
+  "${JENKINS_URL}/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)")
 
-                    sh """
-                        curl -X POST -H "Content-Type: application/json" \
-                             -u "${JIRA_USER}:${JIRA_TOKEN}" \
-                             --data '${payload}' \
-                             ${env.JIRA_BASE_URL}/rest/api/3/issue
-                    """
-                }
-            }
-        }
-    }
-}
+if [ -z "$CRUMB" ]; then
+  echo "[ERROR] Failed to get CSRF crumb."
+  exit 1
+fi
+
+# Loop through and create each resource
+for entry in "${RESOURCES[@]}"; do
+  IFS="|" read -r NAME LABELS DESC <<< "$entry"
+
+  echo "[INFO] Creating resource: $NAME"
+
+  curl -s -X POST "${JENKINS_URL}/lockable-resources/createResource" \
+    -H "$CRUMB" \
+    --user "${USERNAME}:${API_TOKEN}" \
+    --data-urlencode "name=${NAME}" \
+    --data-urlencode "labels=${LABELS}" \
+    --data-urlencode "description=${DESC}" \
+    && echo "[SUCCESS] Created $NAME" || echo "[FAIL] Failed to create $NAME"
+done
