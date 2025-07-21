@@ -1,40 +1,39 @@
 #!/bin/bash
 
-# -------- Configuration --------
-JENKINS_URL="http://your-jenkins-host"
+# ------------- CONFIG -------------
+JENKINS_URL="http://your-jenkins-url"        # Example: http://jenkins.local:8080
 USERNAME="your-username"
 API_TOKEN="your-api-token"
 
-# List of resources to create
-# Format: name|labels|description
+# Define resources in "name|labels|description" format
 RESOURCES=(
-  "device-01|android,pixel|Pixel 6 - Automation Device"
-  "device-02|android,samsung|Samsung Galaxy S22"
-  "device-03|ios,ipad|iPad 10th Gen"
+  "device-001|android,usb|Pixel 6 Android USB device"
+  "device-002|ios,lightning|iPhone 13 Lightning device"
+  "device-003|android,wifi|Samsung Galaxy Tab - WiFi"
 )
+# ----------------------------------
 
-# --------------------------------
-
-# Get CSRF crumb
+# Get CSRF crumb for Jenkins API
 CRUMB=$(curl -s -u "${USERNAME}:${API_TOKEN}" \
   "${JENKINS_URL}/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)")
 
 if [ -z "$CRUMB" ]; then
-  echo "[ERROR] Failed to get CSRF crumb."
+  echo "[ERROR] Failed to fetch CSRF crumb. Check Jenkins URL and credentials."
   exit 1
 fi
 
-# Loop through and create each resource
+# Add each resource
 for entry in "${RESOURCES[@]}"; do
-  IFS="|" read -r NAME LABELS DESC <<< "$entry"
+  IFS="|" read -r NAME LABELS DESCRIPTION <<< "$entry"
 
-  echo "[INFO] Creating resource: $NAME"
+  echo "[INFO] Creating resource: ${NAME}"
 
   curl -s -X POST "${JENKINS_URL}/lockable-resources/createResource" \
     -H "$CRUMB" \
     --user "${USERNAME}:${API_TOKEN}" \
     --data-urlencode "name=${NAME}" \
     --data-urlencode "labels=${LABELS}" \
-    --data-urlencode "description=${DESC}" \
-    && echo "[SUCCESS] Created $NAME" || echo "[FAIL] Failed to create $NAME"
+    --data-urlencode "description=${DESCRIPTION}"
+
+  echo "[SUCCESS] Resource '${NAME}' created with labels '${LABELS}' and description '${DESCRIPTION}'."
 done
