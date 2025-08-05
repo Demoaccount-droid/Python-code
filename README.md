@@ -1,39 +1,30 @@
-#!/bin/bash
+properties([
+  parameters([
+    choice(name: 'AUTO_DEVICE_PICK', choices: ['Yes', 'No'], description: 'Pick device automatically?'),
 
-# ------------- CONFIG -------------
-JENKINS_URL="http://your-jenkins-url"        # Example: http://jenkins.local:8080
-USERNAME="your-username"
-API_TOKEN="your-api-token"
-
-# Define resources in "name|labels|description" format
-RESOURCES=(
-  "device-001|android,usb|Pixel 6 Android USB device"
-  "device-002|ios,lightning|iPhone 13 Lightning device"
-  "device-003|android,wifi|Samsung Galaxy Tab - WiFi"
-)
-# ----------------------------------
-
-# Get CSRF crumb for Jenkins API
-CRUMB=$(curl -s -u "${USERNAME}:${API_TOKEN}" \
-  "${JENKINS_URL}/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)")
-
-if [ -z "$CRUMB" ]; then
-  echo "[ERROR] Failed to fetch CSRF crumb. Check Jenkins URL and credentials."
-  exit 1
-fi
-
-# Add each resource
-for entry in "${RESOURCES[@]}"; do
-  IFS="|" read -r NAME LABELS DESCRIPTION <<< "$entry"
-
-  echo "[INFO] Creating resource: ${NAME}"
-
-  curl -s -X POST "${JENKINS_URL}/lockable-resources/createResource" \
-    -H "$CRUMB" \
-    --user "${USERNAME}:${API_TOKEN}" \
-    --data-urlencode "name=${NAME}" \
-    --data-urlencode "labels=${LABELS}" \
-    --data-urlencode "description=${DESCRIPTION}"
-
-  echo "[SUCCESS] Resource '${NAME}' created with labels '${LABELS}' and description '${DESCRIPTION}'."
-done
+    [$class: 'CascadeChoiceParameter',
+      choiceType: 'PT_SINGLE_SELECT',
+      filterable: false,
+      name: 'SELECTED_DEVICE',
+      randomName: 'choice-device-uid',
+      referencedParameters: 'AUTO_DEVICE_PICK',
+      script: [
+        $class: 'GroovyScript',
+        fallbackScript: [classpath: [], sandbox: false, script: 'return ["No Devices"]'],
+        script: [classpath: [], sandbox: false, script: '''
+          if (AUTO_DEVICE_PICK == "Yes") {
+              def devices = "adb devices".execute().text.readLines()
+                            .findAll { it ==~ /[a-zA-Z0-9]+\\s+device/ }
+                            .collect { it.tokenize()[0] }
+              return devices ? [devices[0]] : ["No Devices Found"]
+          } else {
+              def devices = "adb devices".execute().text.readLines()
+                            .findAll { it ==~ /[a-zA-Z0-9]+\\s+device/ }
+                            .collect { it.tokenize()[0] }
+              return devices ?: ["No Devices Found"]
+          }
+        ''']
+      ]
+    ]
+  ])
+])
